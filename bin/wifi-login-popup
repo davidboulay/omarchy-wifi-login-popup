@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# Wi-Fi Login Popup: open the captive-portal sign-in page when NetworkManager
+# detects one.
+#
+#   wifi-login-popup watch    follow NetworkManager (run by Service.qml)
+#   wifi-login-popup open     open the sign-in page now (manual trigger)
+#
+# Omarchy has no captive-portal helper. NetworkManager's connectivity check
+# flips to PORTAL on hotel/airport Wi-Fi, but nothing on the desktop acts on
+# it. The watcher opens the page once per connection that enters PORTAL and
+# re-arms when the connection leaves it (login done, or another network).
+set -uo pipefail
+
+HERE=$(dirname "$(readlink -f "$0")")
+WINDOW="$HERE/wifi-login-window"
+APP_CLASS="wifi-login-popup"
+FALLBACK_URL="http://neverssl.com/"
+NM=org.freedesktop.NetworkManager
+NM_PATH=/org/freedesktop/NetworkManager
+PORTAL=2   # NMConnectivityState: 1 none, 2 portal, 3 limited, 4 full
+
+nm_prop() {  # nm_prop <property> -> value without type prefix or quotes
+  busctl --system get-property "$NM" "$NM_PATH" "$NM" "$1" 2>/dev/null \
+    | awk '{ $1=""; sub(/^ /,""); gsub(/"/,""); print }'
+}
+
+state() { echo "${WIFI_LOGIN_FAKE_STATE:-$(nm_prop Connectivity)}"; }
+
+# The portal's login URL is where it redirects NM's plain-http check URL. Some
+# portals answer 200 with a meta-refresh or JS page instead of a redirect. With
+# neither, open the check URL itself: the portal intercepts it the same way.
+portal_url() {
+  local check body url
+  check=$(nm_prop ConnectivityCheckUri)
+  [ -n "$check" ] || check=$FALLBACK_URL
+  url=$(curl -s -o /dev/null --max-time 6 -w '%{redirect_url}' "$check" 2>/dev/null)
+  if [ -z "$url" ]; then
+    body=$(curl -s --max-time 6 "$check" 2>/dev/null | head -c 20000)
+    url=$(printf '%s' "$body" \
+      | grep -oiE '(url=|location(\.href)? *= *["'\''])https?://[^"'\'' >;]+' \
+      | head -1 | sed -E 's/^(url=|location(\.href)? *= *["'\''])//I')
+  fi
+  echo "${url:-$check}"
+}
+
+notify() {
+  busctl --user call org.freedesktop.Notifications /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify susssasa{sv}i \
+    "Wi-Fi" 0 "network-wireless" "$1" "$2" 0 0 8000 >/dev/null 2>&1 || true
+}
+
+# Float, center and fully opaque. Added at runtime rather than written into the
+# user's Hyprland config; it lasts until the next config reload, and is added
+# again before every popup.
+float_rule() {
+  command -v hyprctl >/dev/null || return 0
+  hyprctl eval "hl.window_rule({ match = { class = \"^${APP_CLASS}\$\" }, float = true, center = true, size = { 900, 750 }, tag = \"-default-opacity\", opacity = \"1 1\" })" >/dev/null 2>&1 || true
+}
+
+open_page() {
+  local url ssid
+  url=$(portal_url)
+  ssid=$(nmcli -t -f ACTIVE,SSID dev wifi 2>/dev/null | awk -F: '$1=="yes"{print $2; exit}')
+  echo "portal on '${ssid:-?}': opening $url"
+  notify "Wi-Fi sign-in required" "${ssid:+$ssid: }opening the sign-in page"
+  if pgrep -f "python3 -I $WINDOW " >/dev/null 2>&1; then
+    echo "popup already open"
+    return 0
+  fi
+  float_rule
+  # Popup first; the default browser only if the popup cannot start.
+  ( python3 -I "$WINDOW" "$url" "$APP_CLASS" >/dev/null 2>&1 \
+      || xdg-open "$url" >/dev/null 2>&1 ) &
+}
+
+watch() {
+  local opened_for="" mon line
+
+  evaluate() {
+    local s conn
+    s=$(state)
+    conn=$(nm_prop PrimaryConnection)
+    if [ "$s" = "$PORTAL" ]; then
+      if [ "$conn" != "$opened_for" ]; then
+        opened_for=$conn
+        open_page
+      fi
+    else
+      [ -n "$opened_for" ] && echo "connectivity=$s, re-armed"
+      opened_for=""
+    fi
+  }
+
+  echo "watching NetworkManager (connectivity now: $(state))"
+  evaluate
+  # Every PropertiesChanged on the NM manager -> re-read the two properties.
+  exec {mon}< <(exec gdbus monitor --system --dest "$NM" --object-path "$NM_PATH" 2>/dev/null)
+  local mon_pid=$!
+  trap 'kill "$mon_pid" 2>/dev/null' EXIT
+  trap 'exit 0' TERM INT
+  while IFS= read -r line <&"$mon"; do
+    case "$line" in *Connectivity*|*PrimaryConnection*) evaluate ;; esac
+  done
+  echo "NetworkManager monitor ended"
+  exit 1
+}
+
+case "${1:-}" in
+  watch) watch ;;
+  open) open_page ;;
+  *) echo "usage: wifi-login-popup watch|open" >&2; exit 2 ;;
+esac

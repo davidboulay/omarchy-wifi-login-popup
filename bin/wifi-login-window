@@ -1,0 +1,99 @@
+#!/usr/bin/python3 -I
+"""Floating sign-in window for Wi-Fi captive portals.
+
+    wifi-login-window URL [APP_ID]
+
+A small WebKitGTK window (webkit2gtk-4.1 and python-gobject, both in
+Omarchy's base install). Storage is ephemeral: no cookies or history are kept.
+It closes itself once NetworkManager reports full connectivity, unless it was
+already online when it opened. Exits 0 on a normal close; a failure to start
+exits non-zero so the caller can fall back to the default browser.
+"""
+import sys
+
+import gi
+
+gi.require_version("Gdk", "3.0")  # unpinned, Gdk resolves to 4.0 and clashes
+gi.require_version("Gtk", "3.0")
+gi.require_version("WebKit2", "4.1")
+from gi.repository import Gdk, Gio, GLib, Gtk, WebKit2  # noqa: E402
+
+NM = "org.freedesktop.NetworkManager"
+NM_PATH = "/org/freedesktop/NetworkManager"
+FULL = 4
+TITLE = "Wi-Fi sign-in"
+
+
+def connectivity(bus):
+    try:
+        v = bus.call_sync(NM, NM_PATH, "org.freedesktop.DBus.Properties", "Get",
+                          GLib.Variant("(ss)", (NM, "Connectivity")),
+                          GLib.VariantType("(v)"), Gio.DBusCallFlags.NONE, 2000, None)
+        return v.unpack()[0]
+    except GLib.Error:
+        return None
+
+
+def main():
+    url = sys.argv[1] if len(sys.argv) > 1 else "http://neverssl.com/"
+    GLib.set_prgname(sys.argv[2] if len(sys.argv) > 2 else "wifi-login-popup")  # Wayland app_id
+    GLib.set_application_name(TITLE)
+
+    bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+    online_at_start = connectivity(bus) == FULL
+
+    view = WebKit2.WebView.new_with_context(WebKit2.WebContext.new_ephemeral())
+    # Portal pages assume a browser's white canvas; GTK's default is transparent.
+    view.set_background_color(Gdk.RGBA(red=1, green=1, blue=1, alpha=1))
+
+    win = Gtk.Window(title=TITLE)
+    win.set_default_size(900, 750)
+    hb = Gtk.HeaderBar(show_close_button=True, title=TITLE)
+    win.set_titlebar(hb)
+
+    reload_btn = Gtk.Button.new_from_icon_name("view-refresh-symbolic", Gtk.IconSize.BUTTON)
+    reload_btn.set_tooltip_text("Reload")
+    reload_btn.connect("clicked", lambda *_: view.reload())
+    hb.pack_start(reload_btn)
+
+    browser_btn = Gtk.Button(label="Open in browser")
+    browser_btn.connect("clicked", lambda *_: Gio.AppInfo.launch_default_for_uri(
+        view.get_uri() or url, None))
+    hb.pack_end(browser_btn)
+
+    def on_title(*_):
+        uri = view.get_uri() or ""
+        hb.set_title(view.get_title() or TITLE)
+        hb.set_subtitle(GLib.Uri.parse(uri, GLib.UriFlags.NONE).get_host() if uri else None)
+
+    view.connect("notify::title", on_title)
+    view.connect("notify::uri", on_title)
+
+    # target=_blank and window.open: keep the page in this window.
+    def on_create(v, action):
+        req = action.get_request()
+        if req and req.get_uri():
+            v.load_uri(req.get_uri())
+        return None
+    view.connect("create", on_create)
+
+    win.add(view)
+    win.connect("destroy", Gtk.main_quit)
+    win.show_all()
+    view.load_uri(url)
+
+    def poll():
+        if connectivity(bus) == FULL:
+            hb.set_subtitle("Connected")
+            GLib.timeout_add(1500, lambda: (win.destroy(), False)[1])
+            return False
+        return True
+    if not online_at_start:
+        GLib.timeout_add_seconds(3, poll)
+
+    Gtk.main()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

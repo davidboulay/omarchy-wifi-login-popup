@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.davidboulay.wifi-login-popup",
+  "name": "Wi-Fi Login Popup",
+  "version": "1.0.0",
+  "author": "David Boulay",
+  "description": "Opens the sign-in page of hotel, airport and other public Wi-Fi in a floating popup as soon as NetworkManager detects a captive portal, then closes it once you are online.",
+  "homepage": "https://github.com/davidboulay/omarchy-wifi-login-popup",
+  "license": "MIT",
+  "kinds": [
+    "service"
+  ],
+  "entryPoints": {
+    "service": "Service.qml"
+  }
+}
