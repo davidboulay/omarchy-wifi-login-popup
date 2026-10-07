@@ -6,17 +6,24 @@
 A small WebKitGTK window (webkit2gtk-4.1 and python-gobject, both in
 Omarchy's base install). Storage is ephemeral: no cookies or history are kept.
 It closes itself once NetworkManager reports full connectivity, unless it was
-already online when it opened. Exits 0 on a normal close; a failure to start
-exits non-zero so the caller can fall back to the default browser.
+already online when it opened. Exits 0 on a normal close and 3 when it
+cannot start (missing libraries, no display). Only 3 makes the caller fall
+back to the browser, so a window killed at logout never opens one.
 """
 import sys
 
-import gi
+CANNOT_START = 3  # the caller falls back to the browser on this code only
 
-gi.require_version("Gdk", "3.0")  # unpinned, Gdk resolves to 4.0 and clashes
-gi.require_version("Gtk", "3.0")
-gi.require_version("WebKit2", "4.1")
-from gi.repository import Gdk, Gio, GLib, Gtk, WebKit2  # noqa: E402
+try:
+    import gi
+
+    gi.require_version("Gdk", "3.0")  # unpinned, Gdk resolves to 4.0 and clashes
+    gi.require_version("Gtk", "3.0")
+    gi.require_version("WebKit2", "4.1")
+    from gi.repository import Gdk, Gio, GLib, Gtk, WebKit2  # noqa: E402
+except (ImportError, ValueError) as e:
+    print(f"wifi-login-window: {e}", file=sys.stderr)
+    sys.exit(CANNOT_START)
 
 NM = "org.freedesktop.NetworkManager"
 NM_PATH = "/org/freedesktop/NetworkManager"
@@ -38,6 +45,10 @@ def main():
     url = sys.argv[1] if len(sys.argv) > 1 else "http://neverssl.com/"
     GLib.set_prgname(sys.argv[2] if len(sys.argv) > 2 else "wifi-login-popup")  # Wayland app_id
     GLib.set_application_name(TITLE)
+
+    if not Gtk.init_check(sys.argv)[0]:
+        print("wifi-login-window: no display", file=sys.stderr)
+        return CANNOT_START
 
     bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
     online_at_start = connectivity(bus) == FULL

@@ -61,16 +61,20 @@ open_page() {
   local url ssid
   url=$(portal_url)
   ssid=$(nmcli -t -f ACTIVE,SSID dev wifi 2>/dev/null | awk -F: '$1=="yes"{print $2; exit}')
-  echo "portal on '${ssid:-?}': opening $url"
-  notify "Wi-Fi sign-in required" "${ssid:+$ssid: }opening the sign-in page"
   if pgrep -f "python3 -I $WINDOW " >/dev/null 2>&1; then
     echo "popup already open"
     return 0
   fi
+  echo "portal on '${ssid:-?}': opening $url"
+  notify "Wi-Fi sign-in required" "${ssid:+$ssid: }opening the sign-in page"
   float_rule
-  # Popup first; the default browser only if the popup cannot start.
-  ( python3 -I "$WINDOW" "$url" "$APP_CLASS" >/dev/null 2>&1 \
-      || xdg-open "$url" >/dev/null 2>&1 ) &
+  # Popup first; the default browser only if the popup cannot start at all
+  # (exit 3, or no python3). A popup closed or killed (logout) opens nothing.
+  (
+    python3 -I "$WINDOW" "$url" "$APP_CLASS" >/dev/null 2>&1
+    rc=$?
+    case $rc in 3|126|127) xdg-open "$url" >/dev/null 2>&1 ;; esac
+  ) &
 }
 
 watch() {
@@ -94,7 +98,10 @@ watch() {
   echo "watching NetworkManager (connectivity now: $(state))"
   evaluate
   # Every PropertiesChanged on the NM manager -> re-read the two properties.
-  exec {mon}< <(exec gdbus monitor --system --dest "$NM" --object-path "$NM_PATH" 2>/dev/null)
+  # The shell stops this script with SIGKILL, so traps never run: pdeathsig
+  # makes the monitor exit together with this process instead of lingering.
+  exec {mon}< <(exec setpriv --pdeathsig TERM \
+    gdbus monitor --system --dest "$NM" --object-path "$NM_PATH" 2>/dev/null)
   local mon_pid=$!
   trap 'kill "$mon_pid" 2>/dev/null' EXIT
   trap 'exit 0' TERM INT
