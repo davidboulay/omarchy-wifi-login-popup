@@ -10,7 +10,7 @@ macOS, iOS, Windows and GNOME all pop up the "log in to this network" window by 
 
 - Watches NetworkManager's connectivity state over D-Bus. Nothing is polled.
 - When the state becomes **portal**, it shows a "Wi-Fi sign-in required" notification and opens NetworkManager's own plain-http check URL in the popup. The portal intercepts that request just as it intercepted NetworkManager's check, and the popup follows the portal's redirect to its sign-in page.
-- Opens the page in a floating, centered WebKitGTK window with **Reload** and **Open in browser** buttons. Storage is ephemeral, so no cookies or history are kept.
+- Opens the page in a floating, centered WebKitGTK window with **Reload** and **Open in browser** buttons. Storage is ephemeral, so no cookies or history are kept. Rendering is software-only: a sign-in page needs no GPU, and this keeps the GPU driver out of the web process.
 - Closes the window once NetworkManager reports full connectivity.
 - Opens once per connection. It re-arms when you leave the portal state (logged in, or switched network).
 - If the window cannot start, the page opens in your default browser instead.

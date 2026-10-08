@@ -54,6 +54,13 @@ def main():
     online_at_start = connectivity(bus) == FULL
 
     view = WebKit2.WebView.new_with_context(WebKit2.WebContext.new_ephemeral())
+    # A sign-in page needs no GPU. Software rendering keeps Mesa's driver and
+    # compositor threads out of the web process: 2026-10-08 a hotel portal
+    # session ended in a WebKitWebProcess abort at exit (free(): corrupted
+    # unsorted chunks) with those threads still alive. It did not reproduce
+    # locally, so this removes a suspect rather than a proven cause.
+    view.get_settings().set_hardware_acceleration_policy(
+        WebKit2.HardwareAccelerationPolicy.NEVER)
     # Portal pages assume a browser's white canvas; GTK's default is transparent.
     view.set_background_color(Gdk.RGBA(red=1, green=1, blue=1, alpha=1))
 
