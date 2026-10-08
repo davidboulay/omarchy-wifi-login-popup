@@ -9,7 +9,7 @@ macOS, iOS, Windows and GNOME all pop up the "log in to this network" window by 
 ## What it does
 
 - Watches NetworkManager's connectivity state over D-Bus. Nothing is polled.
-- When the state becomes **portal**, it finds the sign-in page and shows a "Wi-Fi sign-in required" notification. To find the page it tries the redirect of NetworkManager's check URL, then a meta-refresh or JavaScript link on that page, and otherwise opens the check URL itself, which the portal intercepts.
+- When the state becomes **portal**, it shows a "Wi-Fi sign-in required" notification and opens NetworkManager's own plain-http check URL in the popup. The portal intercepts that request just as it intercepted NetworkManager's check, and the popup follows the portal's redirect to its sign-in page.
 - Opens the page in a floating, centered WebKitGTK window with **Reload** and **Open in browser** buttons. Storage is ephemeral, so no cookies or history are kept.
 - Closes the window once NetworkManager reports full connectivity.
 - Opens once per connection. It re-arms when you leave the portal state (logged in, or switched network).
@@ -62,7 +62,7 @@ Everything ships with a stock Omarchy 4 install:
 |---|---|---|
 | NetworkManager with its connectivity check enabled (the default) | detects the portal | `networkmanager` |
 | WebKitGTK 4.1 + PyGObject | the popup window | `webkit2gtk-4.1` (pulled in by `aether`), `python-gobject` |
-| `gdbus`, `busctl`, `curl`, `nmcli`, `hyprctl` | watching, notifying, finding the URL, the float rule | `glib2`, `systemd`, `curl`, `networkmanager`, `hyprland` |
+| `gdbus`, `busctl`, `nmcli`, `hyprctl` | watching, notifying, naming the network, the float rule | `glib2`, `systemd`, `networkmanager`, `hyprland` |
 
 If the connectivity check is turned off, nothing is ever detected. Check with:
 
@@ -82,11 +82,10 @@ The window's Wayland app id is `wifi-login-popup`. Right before each popup, the 
 This plugin runs unsandboxed under `omarchy-shell` while it is enabled. It:
 
 - reads NetworkManager's state over the system D-Bus (read-only);
-- requests NetworkManager's own connectivity-check URL with `curl` to learn where the portal redirects. This happens only while a portal is detected or when you run `open`;
-- loads the portal's sign-in page in an ephemeral WebKitGTK view, with TLS validation left at WebKit's defaults;
+- loads NetworkManager's own connectivity-check URL, and the portal's sign-in page it redirects to, in an ephemeral WebKitGTK view, with TLS validation left at WebKit's defaults. This happens only while a portal is detected or when you run `open`;
 - sends a desktop notification and adds the runtime window rule described above.
 
-It needs no root, installs no system service, and makes no other network requests.
+It needs no root, installs no system service, downloads nothing, and makes no other network requests.
 
 ## License
 

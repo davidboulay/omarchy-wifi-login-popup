@@ -26,21 +26,13 @@ nm_prop() {  # nm_prop <property> -> value without type prefix or quotes
 
 state() { echo "${WIFI_LOGIN_FAKE_STATE:-$(nm_prop Connectivity)}"; }
 
-# The portal's login URL is where it redirects NM's plain-http check URL. Some
-# portals answer 200 with a meta-refresh or JS page instead of a redirect. With
-# neither, open the check URL itself: the portal intercepts it the same way.
-portal_url() {
-  local check body url
+# The page to open: NetworkManager's own plain-http check URL. The portal
+# intercepts it exactly as it intercepted NM's check, and the popup (a real
+# browser engine) follows the portal's redirect, meta-refresh or script itself.
+check_url() {
+  local check
   check=$(nm_prop ConnectivityCheckUri)
-  [ -n "$check" ] || check=$FALLBACK_URL
-  url=$(curl -s -o /dev/null --max-time 6 -w '%{redirect_url}' "$check" 2>/dev/null)
-  if [ -z "$url" ]; then
-    body=$(curl -s --max-time 6 "$check" 2>/dev/null | head -c 20000)
-    url=$(printf '%s' "$body" \
-      | grep -oiE '(url=|location(\.href)? *= *["'\''])https?://[^"'\'' >;]+' \
-      | head -1 | sed -E 's/^(url=|location(\.href)? *= *["'\''])//I')
-  fi
-  echo "${url:-$check}"
+  echo "${check:-$FALLBACK_URL}"
 }
 
 notify() {
@@ -59,13 +51,13 @@ float_rule() {
 
 open_page() {
   local url ssid
-  url=$(portal_url)
+  url=$(check_url)
   ssid=$(nmcli -t -f ACTIVE,SSID dev wifi 2>/dev/null | awk -F: '$1=="yes"{print $2; exit}')
   if pgrep -f "python3 -I $WINDOW " >/dev/null 2>&1; then
     echo "popup already open"
     return 0
   fi
-  echo "portal on '${ssid:-?}': opening $url"
+  echo "portal on '${ssid:-?}': opening the sign-in page via $url"
   notify "Wi-Fi sign-in required" "${ssid:+$ssid: }opening the sign-in page"
   float_rule
   # Popup first; the default browser only if the popup cannot start at all
